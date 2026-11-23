@@ -96,7 +96,16 @@
     const COLS = ['#b91c1c', '#1d4ed8', '#d97706', '#15803d', '#475569'];
     const roofM = new THREE.MeshLambertMaterial({ color: '#ffffff' });
 
-    const wt = [0, 1, 2].map(() => {
+        function makeWinTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d'); x.fillStyle = '#0f172a'; x.fillRect(0, 0, 64, 64);
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+        if (Math.random() < 0.7) { x.fillStyle = '#fde047'; x.fillRect(6 + i * 32, 8 + j * 32, 20, 18); }
+      }
+      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+    }
+    const wt = [makeWinTex(), makeWinTex(), makeWinTex()];
+
       const c = document.createElement('canvas'); c.width = c.height = 64;
       const x = c.getContext('2d'); x.fillStyle = '#0f172a'; x.fillRect(0, 0, 64, 64);
       for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
