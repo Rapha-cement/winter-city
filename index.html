@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Winterstad 3D - Story Mode & Upgrades</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #0b132b; user-select: none; }
+    #hud {
+      position: absolute; top: 12px; left: 12px; color: #fff;
+      background: rgba(11, 19, 43, 0.85); padding: 14px 18px; border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(6px); max-width: 360px;
+    }
+    #hud h2 { margin: 0 0 6px 0; font-size: 18px; color: #ffd23f; }
+    .stat { font-size: 14px; margin: 4px 0; }
+    .badge { padding: 2px 8px; border-radius: 6px; font-weight: bold; background: #d11f2a; }
+    #story-box {
+      margin-top: 10px; padding: 10px; border-radius: 8px;
+      background: rgba(30, 58, 138, 0.65); border-left: 4px solid #38bdf8;
+      font-size: 13px; line-height: 1.4;
+    }
+    #dialogue {
+      position: absolute; bottom: 75px; left: 50%; transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.92); color: #fff; padding: 14px 22px;
+      border-radius: 14px; border: 2px solid #ffd23f; max-width: 520px;
+      text-align: center; font-size: 14px; display: none; box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+    }
+    #arr {
+      position: absolute; right: 18px; top: 14px; color: #ffd23f;
+      font: bold 14px sans-serif; text-align: center;
+      background: rgba(11, 19, 43, 0.85); padding: 10px 14px; border-radius: 12px;
+      border: 1px solid rgba(255, 210, 63, 0.4); pointer-events: none;
+    }
+    #arr-icon { display: block; font-size: 32px; line-height: 1.1; }
+    #controls {
+      position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      color: #e2e8f0; background: rgba(11, 19, 43, 0.88); padding: 8px 16px;
+      border-radius: 16px; font-size: 12px; text-align: center;
+      border: 1px solid rgba(255,255,255,0.15); width: 92%; max-width: 920px;
+    }
+    kbd { background: #1e293b; padding: 2px 5px; border-radius: 4px; border: 1px solid #475569; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h2>❄️ Winterstad 3D: Story Mode</h2>
+    <div class="stat">Held: <span id="hero-name" class="badge">SPIDEY</span> &nbsp;|&nbsp; ☕ <span id="cocoa-txt">0</span>/20</div>
+    <div id="story-box">
+      <strong id="chapter-title">Hoofdstuk 1: De Kerst-Noodoproep</strong><br>
+      <span id="mission-txt">Loop naar de Kerstman op het plein!</span>
+    </div>
+  </div>
+
+  <div id="dialogue"></div>
+
+  <div id="arr">
+    <span id="arr-icon">⬆️</span>
+    <span id="arr-dist">0m</span>
+  </div>
+
+  <div id="controls">
+    <kbd>WASD</kbd> Lopen &nbsp;|&nbsp;
+    <kbd>Spatie</kbd> Springen / Muurklimmen &nbsp;|&nbsp;
+    <kbd>Muis slepen</kbd> / <kbd>IJKL</kbd> Camera &nbsp;|&nbsp;
+    <kbd>C</kbd> Wissel Held &nbsp;|&nbsp;
+    <span id="hero-keys">
+      <kbd>E</kbd> Web-slinger (hand) &nbsp;|&nbsp; <kbd>F</kbd> Webschot
+    </span>
+  </div>
+
+  <script src="https://cloudflare.com"></script>
+  <script>
+    const rnd = (a, b) => a + Math.random() * (b - a);
+
+    const sc = new THREE.Scene();
+    sc.background = new THREE.Color('#172e54');
+    sc.fog = new THREE.FogExp2('#223f70', 0.0048);
+
+    const cam = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 600);
+    const ren = new THREE.WebGLRenderer({ antialias: true });
+    ren.setSize(innerWidth, innerHeight);
+    document.body.appendChild(ren.domElement);
+
+    sc.add(new THREE.HemisphereLight('#7dd3fc', '#f472b6', 0.95));
+    const dirLight = new THREE.DirectionalLight('#fecdd3', 1.15);
+    dirLight.position.set(100, 90, -120);
+    sc.add(dirLight);
+
+    const streetGlow = new THREE.PointLight('#fbbf24', 1.2, 35);
+    sc.add(streetGlow);
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshLambertMaterial({ color: '#f1f5f9' }));
+    ground.rotation.x = -Math.PI / 2;
+    sc.add(ground);
+
+    const B = [];
+    const COLS = ['#b91c1c', '#1d4ed8', '#d97706', '#15803d', '#475569'];
+    const roofM = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+
+    const wt = [0, 1, 2].map(() => {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d'); x.fillStyle = '#0f172a'; x.fillRect(0, 0, 64, 64);
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+        if (Math.random() < 0.7) { x.fillStyle = Math.random() < 0.85 ? '#fde047' : '#fb923c'; x.fillRect(6 + i * 32, 8 + j * 32, 20, 18); }
+      }
+      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+    });
+
+    const BM = [];
+    for (let c = 0; c < 5; c++) for (let k = 0; k < 3; k++) {
+      BM.push(new THREE.MeshLambertMaterial({ color: COLS[c], emissive: '#ffffff', emissiveMap: wt[k] }));
+    }
+
+    let tower = null;
+    const poleMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
+    const bulbMat = new THREE.MeshBasicMaterial({ color: '#fef08a' });
+
+    for (let i = -5; i <= 5; i++) {
+      for (let j = -5; j <= 5; j++) {
+        if (Math.abs(i) <= 1 && Math.abs(j) <= 1) continue;
+        const isTower = (i === 3 && j === 3);
+        const w = isTower ? 15 : rnd(11, 16);
+        const d = isTower ? 15 : rnd(11, 16);
+        const h = isTower ? 64 : (Math.random() < 0.35 ? rnd(8, 14) : rnd(18, 44));
+        const x = i * 29;
+        const z = j * 29;
+
+        const geo = new THREE.BoxGeometry(w, h, d);
+        const uv = geo.attributes.uv;
+        for (let q = 0; q < uv.count; q++) {
+          const fc = (q / 4) | 0;
+          if (fc === 2 || fc === 3) continue;
+          uv.setXY(q, uv.getX(q) * Math.max(1, Math.round((fc < 2 ? d : w) / 6)), uv.getY(q) * Math.max(1, Math.round(h / 6)));
+        }
+        const sideMat = BM[(Math.abs(i + j) * 3) % BM.length];
+        const m = new THREE.Mesh(geo, [sideMat, sideMat, roofM, sideMat, sideMat, sideMat]);
+        m.position.set(x, h / 2, z);
+        sc.add(m);
+
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 5.5, 6), poleMat);
+        pole.position.set(x + w / 2 + 1.5, 2.75, z + d / 2 + 1.5);
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), bulbMat);
+        lamp.position.set(x + w / 2 + 1.5, 5.6, z + d / 2 + 1.5);
+        sc.add(pole, lamp);
+
+        B.push({ x, z, w, d, h });
+        if (isTower) tower = { x, z, h };
+      }
+    }
+
+    const cars = [];
+    for (let i = 0; i < 14; i++) {
+      const car = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 4.2), new THREE.MeshLambertMaterial({ color: COLS[i % 5] }));
+      body.position.y = 0.8;
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 2.2), new THREE.MeshLambertMaterial({ color: '#e2e8f0' }));
+      cab.position.set(0, 1.6, -0.2);
+      const hl1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.1), bulbMat); hl1.position.set(-0.7, 0.8, 2.11);
+      const hl2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.1), bulbMat); hl2.position.set(0.7, 0.8, 2.11);
+      car.add(body, cab, hl1, hl2);
+      const lane = ((i % 7) - 3) * 29 + 14.5;
+      const alongX = i % 2 === 0;
+      car.position.set(alongX ? rnd(-140, 140) : lane, 0, alongX ? lane : rnd(-140, 140));
+      if (alongX) car.rotation.y = Math.PI / 2;
+      sc.add(car);
+      cars.push({ mesh: car, alongX, speed: (i % 2 === 0 ? 0.35 : -0.35) });
+    }
+
+    function makeSpideyTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 128;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#dc2626'; ctx.fillRect(0, 0, 128, 128);
+      ctx.strokeStyle = '#1f080b'; ctx.lineWidth = 2;
+      for (let i = 0; i <= 128; i += 16) {
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(128, i); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 128); ctx.stroke();
+      }
+      return new THREE.CanvasTexture(c);
+    }
+    const spideyWebTex = makeSpideyTex();
+
+    const SPH = new THREE.SphereGeometry(1, 20, 16);
+    function part(mat, x, y, z, sx, sy, sz, par, rz = 0, rx = 0) {
+      const m = new THREE.Mesh(SPH, mat);
+      m.position.set(x, y, z); m.scale.set(sx, sy, sz);
+      if (rz) m.rotation.z = rz;
+      if (rx) m.rotation.x = rx;
+      par.add(m); return m;
+    }
+    function limb(mat, rt, rb, len, x, y, z, par, rz = 0) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, 16), mat);
+      m.position.set(x, y, z); if (rz) m.rotation.z = rz;
+      par.add(m); return m;
+    }
+
+    function createHeroModel(isSpidey) {
+      const root = new THREE.Group();
+      const webMat = new THREE.MeshLambertMaterial({ map: spideyWebTex });
+      const redMat = isSpidey ? webMat : new THREE.MeshLambertMaterial({ color: '#b91c1c' });
+      const blueMat = new THREE.MeshLambertMaterial({ color: '#1d4ed8' });
+      const blkMat = new THREE.MeshLambertMaterial({ color: '#18181b' });
+      const whiteMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+      const goldMat = new THREE.MeshStandardMaterial({ color: '#facc15', metalness: 0.7, roughness: 0.2 });
+      const steelMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.85, roughness: 0.15 });
+
+      part(isSpidey ? blueMat : blkMat, 0, 1.05, 0, 0.44, 0.22, 0.3, root);
+
+      const legs = [-0.24, 0.24].map(x => {
+        const hip = new THREE.Group(); hip.position.set(x, 1.02, 0); root.add(hip);
+        limb(isSpidey ? blueMat : redMat, 0.21, 0.17, 0.5, 0, -0.25, 0, hip);
+        part(blkMat, 0, -0.5, 0.04, 0.18, 0.14, 0.18, hip);
+        limb(isSpidey ? redMat : blkMat, 0.17, 0.14, 0.48, 0, -0.74, 0, hip);
+        part(isSpidey ? redMat : blkMat, 0, -0.98, 0.1, 0.18, 0.15, 0.34, hip);
+        return hip;
+      });
+
+      const torso = limb(redMat, 0.52, 0.38, 0.96, 0, 1.52, 0, root);
+      torso.scale.set(1.12, 1, 0.66);
+      part(redMat, -0.2, 1.68, 0.24, 0.25, 0.2, 0.16, root);
+      part(redMat, 0.2, 1.68, 0.24, 0.25, 0.2, 0.16, root);
+      part(redMat, 0, 2.48, 0, 0.35, 0.41, 0.38, root);
+for (const s of [-1, 1]) {
+part(blkMat, s * 0.15, 2.51, 0.32, 0.18, 0.13, 0.09, root, -s * 0.38);
+part(whiteMat, s * 0.15, 2.51, 0.35, 0.13, 0.085, 0.06, root, -s * 0.38);
+}
+const arms = [-1, 1].map(s => {
+const shoulder = new THREE.Group(); shoulder.position.set(s * 0.64, 1.92, 0); root.add(shoulder);
+part(redMat, 0, 0, 0, 0.24, 0.24, 0.24, shoulder);
+limb(redMat, 0.17, 0.14, 0.46, 0, -0.23, 0, shoulder);
+limb(isSpidey ? redMat : blkMat, 0.14, 0.12, 0.45, 0, -0.68, 0, shoulder);
+const hand = part(isSpidey ? redMat : blkMat, 0, -0.95, 0, 0.14, 0.15, 0.14, shoulder);
+if (isSpidey) {
+limb(blkMat, 0.15, 0.15, 0.08, 0, -0.82, 0, shoulder);
+} else if (s === 1) {
+const blade = limb(steelMat, 0.03, 0.015, 1.45, 0, -0.95, 0.72, shoulder);
+blade.rotation.x = Math.PI / 2;
+} else {
+const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 0.45), blkMat);
+gun.position.set(0, -0.95, 0.22);
+shoulder.add(gun);
+}
+shoulder.userData.hand = hand;
+return shoulder;
+});
+if (isSpidey) {
+for (const s of [-1, 1]) part(blueMat, s * 0.46, 1.48, 0, 0.11, 0.44, 0.25, root);
+part(blkMat, 0, 1.65, 0.36, 0.08, 0.22, 0.04, root);
+part(blkMat, 0, 1.65, -0.34, 0.11, 0.26, 0.04, root);
+} else {
+for (const s of [-1, 1]) {
+limb(blkMat, 0.07, 0.07, 0.95, s * 0.22, 1.52, 0, root, s * 0.22);
+part(blkMat, s * 0.35, 1.05, 0.24, 0.11, 0.13, 0.11, root);
+limb(blkMat, 0.055, 0.045, 1.35, s * 0.14, 1.72, -0.32, root, s * 0.4);
+}
+part(goldMat, 0, 1.05, 0.32, 0.15, 0.12, 0.06, root);
+}
+root.userData = { legs, arms, rightHand: arms[1].userData.hand, leftHand: arms[0].userData.hand };
+return root;
+}
+const HS = [createHeroModel(true), createHeroModel(false)];
+HS[1].visible = false;
+sc.add(HS[0], HS[1]);
+const santa = new THREE.Group();
+limb(new THREE.MeshLambertMaterial({ color: '#dc2626' }), 0.7, 0.85, 1.6, 0, 1.1, 0, santa);
+part(new THREE.MeshLambertMaterial({ color: '#fed7aa' }), 0, 2.2, 0, 0.45, 0.45, 0.45, santa);
+part(new THREE.MeshLambertMaterial({ color: '#ffffff' }), 0, 2.0, 0.3, 0.42, 0.45, 0.3, santa);
+const hat = new THREE.Mesh(new THREE.ConeGeometry(0.48, 0.9, 12), new THREE.MeshLambertMaterial({ color: '#dc2626' }));
+hat.position.y = 2.85; santa.add(hat);
+santa.position.set(0, 0, -10);
+sc.add(santa);
+const hostages = [];
+const iceMat = new THREE.MeshLambertMaterial({ color: '#38bdf8', transparent: true, opacity: 0.65 });
+const hCoords = [[-35, -35], [40, -30], [-25, 45]];
+hCoords.forEach(([hx, hz]) => {
+const g = new THREE.Group();
+limb(new THREE.MeshLambertMaterial({ color: '#10b981' }), 0.35, 0.35, 1.8, 0, 0.9, 0, g);
+const iceBlock = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.6, 1.8), iceMat);
+iceBlock.position.y = 1.3;
+g.add(iceBlock);
+g.position.set(hx, 0, hz);
+sc.add(g);
+hostages.push({ group: g, ice: iceBlock, freed: false });
+});
+const boss = new THREE.Group();
+const wMat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+part(wMat, 0, 2.2, 0, 2.2, 2.2, 2.2, boss);
+part(wMat, 0, 5.0, 0, 1.5, 1.5, 1.5, boss);
+part(wMat, 0, 7.0, 0, 1.0, 1.0, 1.0, boss);
+const crown = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 0.9, 0.8, 8), new THREE.MeshBasicMaterial({ color: '#facc15' }));
+crown.position.y = 8.1; boss.add(crown);
+boss.position.set(0, 0, -35);
+boss.visible = false;
+sc.add(boss);
+let bossHP = 100;
+const mugs = [];
+for (let i = 0; i < 20; i++) {
+const m = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.4, 0.85, 12), new THREE.MeshLambertMaterial({ color: '#ef4444' }));
+if (i % 2 === 0 && B.length > 0) { const b = B[i % B.length]; m.position.set(b.x, b.h + 1.2, b.z); }
+else { m.position.set(rnd(-110, 110), 1.0, rnd(-110, 110)); }
+sc.add(m); mugs.push({ mesh: m, taken: false });
+}
+const enemies = [];
+for (let i = 0; i < 12; i++) {
+const e = new THREE.Group();
+part(wMat, 0, 0.9, 0, 0.9, 0.9, 0.9, e);
+part(wMat, 0, 2.1, 0, 0.65, 0.65, 0.65, e);
+part(wMat, 0, 3.0, 0, 0.45, 0.45, 0.45, e);
+e.position.set(rnd(-100, 100), 0, rnd(-100, 100));
+if (e.position.length() < 22) e.position.x += 28;
+sc.add(e); enemies.push({ mesh: e, alive: true });
+}
+const projectiles = [];
+const explosions = [];
+function showDialogue(text, ms = 4500) {
+const d = document.getElementById('dialogue');
+d.innerHTML = text; d.style.display = 'block';
+clearTimeout(d.timer);
+d.timer = setTimeout(() => { d.style.display = 'none'; }, ms);
+}
+let chapter = 0;
+const chapters = [
+{
+title: "Hoofdstuk 1: De Noodoproep",
+desc: "Praat met de Kerstman op het plein!",
+target: () => santa.position,
+check: () => {
+if (p.distanceTo(santa.position) < 4.5) {
+showDialogue("🎅 Kerstman: 'Help! De Sneeuwkoning heeft 3 burgers ingevroren en al onze chocomelk gestolen! Bevrijd de burgers eerst!'");
+return true;
+}
+return false;
+}
+},
+{
+title: "Hoofdstuk 2: Bevrijd de Burgers",
+desc: () => Sla het ijs kapot met [F] of schiet met [G] (${hostages.filter(h => h.freed).length}/3 bevrijd),
+target: () => { const h = hostages.find(x => !x.freed); return h ? h.group.position : santa.position; },
+check: () => hostages.every(h => h.freed)
+},
+{
+title: "Hoofdstuk 3: De Hoogste Toren",
+desc: "Klim naar het dak van de hoogste toren om het signaal te activeren!",
+target: () => new THREE.Vector3(tower.x, tower.h, tower.z),
+check: () => {
+if (tower && Math.hypot(p.x - tower.x, p.z - tower.z) < 11 && p.y >= tower.h - 0.5) {
+showDialogue("⚡ Signaal geactiveerd! De Mega-Sneeuwkoning is verschenen op het centrale plein! Versla hem!");
+boss.visible = true;
+return true;
+}
+return false;
+}
+},
+{
+title: "Hoofdstuk 4: Eindbaas - De Sneeuwkoning!",
+desc: () => Versla de Mega-Sneeuwkoning op het plein! (HP: ${Math.max(0, bossHP)}%),
+target: () => boss.position,
+check: () => {
+if (bossHP <= 0) {
+boss.visible = false;
+showDialogue("🎉 GEWONNEN! Winterstad is gered! Je kunt nu vrij rondzwaaien en alle chocomelk verzamelen!");
+return true;
+}
+return false;
+}
+},
+{
+title: "Vrije Wereld: Held van Winterstad",
+desc: "Verzamel de overige chocomelk en verken de stad!",
+target: () => { const m = mugs.find(x => !x.taken); return m ? m.mesh.position : santa.position; },
+check: () => false
+}
+];
+let hero = 0, jumps = 0, swing = false, dash = 0, attackTimer = 0;
+const p = new THREE.Vector3(0, 0, 8);
+const v = new THREE.Vector3(0, 0, 0);
+const anchor = new THREE.Vector3();
+let yaw = 0, pitch = 0.35;
+const webLine = new THREE.Line(
+new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+new THREE.LineBasicMaterial({ color: '#ffffff', linewidth: 3 })
+);
+webLine.visible = false;
+sc.add(webLine);
+const beacon = new THREE.Mesh(
+new THREE.CylinderGeometry(0.9, 0.9, 140, 12, 1, true),
+new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+);
+sc.add(beacon);
+let dragging = false, prevX = 0, prevY = 0;
+window.addEventListener('mousedown', e => { dragging = true; prevX = e.clientX; prevY = e.clientY; });
+window.addEventListener('mouseup', () => dragging = false);
+window.addEventListener('mousemove', e => {
+if (!dragging) return;
+yaw -= (e.clientX - prevX) * 0.007;
+pitch = Math.max(0.05, Math.min(1.3, pitch + (e.clientY - prevY) * 0.006));
+prevX = e.clientX; prevY = e.clientY;
+});
+function fireProjectile(type) {
+const activeH = HS[hero];
+activeH.updateMatrixWorld(true);
+const startPos = new THREE.Vector3();
+(type === 'bullet' ? activeH.userData.leftHand : activeH.userData.rightHand).getWorldPosition(startPos);
+const dir = new THREE.Vector3(Math.sin(activeH.rotation.y), 0, Math.cos(activeH.rotation.y));
+const color = type === 'web' ? '#ffffff' : (type === 'grenade' ? '#ef4444' : '#facc15');
+const size = type === 'grenade' ? 0.35 : 0.22;
+const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshBasicMaterial({ color }));
+mesh.position.copy(startPos);
+sc.add(mesh);
+const vel = dir.clone().multiplyScalar(type === 'grenade' ? 0.7 : 1.5);
+if (type === 'grenade') vel.y = 0.35;
+projectiles.push({ mesh, vel, type, life: 55 });
+}
+const keys = {};
+window.addEventListener('keydown', e => {
+keys[e.code] = true;
+if (e.code === 'Space' && jumps < 2) { v.y = 0.45; jumps++; }
+if (e.code === 'KeyC') {
+hero = 1 - hero;
+HS[0].visible = (hero === 0);
+HS[1].visible = (hero === 1);
+swing = false; webLine.visible = false;
+const b = document.getElementById('hero-name');
+b.textContent = hero === 0 ? 'SPIDEY' : 'DEADPOOL';
+b.style.background = hero === 0 ? '#d11f2a' : '#18181b';
+document.getElementById('hero-keys').innerHTML = hero === 0
+? 'E Web-slinger (uit hand)  |  F Webschot'
+: 'E Ninja Dash  |  F Katana Spin  |  G Pistool  |  Q Choco-Granaat';
+}
+if (e.code === 'KeyE') {
+if (hero === 0 && !swing) {
+let best = 60, found = null;
+for (const b of B) {
+const d = Math.hypot(b.x - p.x, b.z - p.z);
+if (d < best) { best = d; found = new THREE.Vector3(b.x, b.h + 3, b.z); }
+}
+if (found) { swing = true; anchor.copy(found); v.y = Math.max(v.y, 0.36); webLine.visible = true; }
+} else if (hero === 1 && dash <= 0) {
+dash = 12;
+const r = HS[1].rotation.y;
+v.x = Math.sin(r) * 1.05; v.z = Math.cos(r) * 1.05; v.y = 0.25;
+}
+}
+if (e.code === 'KeyF') {
+attackTimer = 16;
+if (hero === 0) {
+fireProjectile('web');
+} else {
+for (const en of enemies) if (en.alive && en.mesh.position.distanceTo(p) < 5.5) { en.alive = false; en.mesh.visible = false; }
+for (const h of hostages) if (!h.freed && h.group.position.distanceTo(p) < 5.5) { h.freed = true; h.ice.visible = false; }
+if (boss.visible && boss.position.distanceTo(p) < 7) bossHP -= 15;
+}
+}
+if (e.code === 'KeyG' && hero === 1) {
+attackTimer = 10;
+fireProjectile('bullet');
+}
+if (e.code === 'KeyQ' && hero === 1) {
+attackTimer = 12;
+fireProjectile('grenade');
+}
+});
+window.addEventListener('keyup', e => {
+keys[e.code] = false;
+if (e.code === 'KeyE') { swing = false; webLine.visible = false; }
+});
+let t = 0;
+function loop() {
+requestAnimationFrame(loop);
+t += 0.1;
+if (keys['KeyJ']) yaw += 0.04;
+if (keys['KeyL']) yaw -= 0.04;
+if (keys['KeyI']) pitch = Math.min(1.3, pitch + 0.03);
+if (keys['KeyK']) pitch = Math.max(0.05, pitch - 0.03);
+let fwd = 0, str = 0;
+if (keys['KeyW'] || keys['ArrowUp']) fwd += 1;
+if (keys['KeyS'] || keys['ArrowDown']) fwd -= 1;
+if (keys['KeyA'] || keys['ArrowLeft']) str -= 1;
+if (keys['KeyD'] || keys['ArrowRight']) str += 1;
+const moving = fwd !== 0 || str !== 0;
+if (moving && dash <= 0) {
+const moveAngle = yaw + Math.atan2(str, -fwd);
+HS[0].rotation.y = HS[1].rotation.y = moveAngle;
+const spd = swing ? 0.48 : 0.3;
+v.x = Math.sin(moveAngle) * spd;
+v.z = Math.cos(moveAngle) * spd;
+} else if (dash <= 0) {
+v.x *= 0.82; v.z *= 0.82;
+}
+if (dash > 0) dash--;
+if (swing) {
+const pull = new THREE.Vector3().subVectors(anchor, p).normalize();
+v.addScaledVector(pull, 0.028);
+v.y += 0.013;
+} else {
+v.y -= 0.018;
+}
+const prevY = p.y;
+p.add(v);
+let on = false, touchingWall = false;
+if (p.y <= 0) { p.y = 0; v.y = 0; on = true; }
+for (const b of B) {
+const hw = b.w / 2 + 0.55, hd = b.d / 2 + 0.55;
+if (Math.abs(p.x - b.x) < hw && Math.abs(p.z - b.z) < hd) {
+if (prevY >= b.h - 0.5 && p.y <= b.h) {
+p.y = b.h; v.y = 0; on = true;
+} else if (p.y < b.h) {
+touchingWall = true;
+const dx = p.x - b.x, dz = p.z - b.z;
+if (Math.abs(dx) / hw > Math.abs(dz) / hd) p.x = b.x + Math.sign(dx) * hw;
+else p.z = b.z + Math.sign(dz) * hd;
+}
+}
+}
+if (touchingWall && (keys['Space'] || (hero === 0 && moving))) {
+v.y = hero === 0 ? 0.32 : 0.22;
+jumps = 1;
+}
+if (on) jumps = 0;
+const activeH = HS[hero];
+activeH.position.copy(p);
+streetGlow.position.set(p.x, p.y + 4, p.z);
+const { legs, arms, rightHand } = activeH.userData;
+if (moving && on) {
+legs[0].rotation.x = Math.sin(t * 2.4) * 0.75;
+legs[1].rotation.x = -Math.sin(t * 2.4) * 0.75;
+arms[0].rotation.x = -Math.sin(t * 2.4) * 0.6;
+arms[1].rotation.x = Math.sin(t * 2.4) * 0.6;
+} else {
+legs[0].rotation.x = legs[1].rotation.x = 0;
+arms[1].rotation.x = swing ? -2.65 : (attackTimer > 0 ? -1.6 : 0);
+arms[0].rotation.x = (hero === 1 && attackTimer > 0) ? -1.5 : 0;
+}
+if (hero === 1 && attackTimer > 0) {
+activeH.rotation.y += 0.45;
+}
+if (attackTimer > 0) attackTimer--;
+if (swing && hero === 0) {
+activeH.updateMatrixWorld(true);
+const handWorldPos = new THREE.Vector3();
+rightHand.getWorldPosition(handWorldPos);
+webLine.geometry.setFromPoints([handWorldPos, anchor]);
+}
+for (let i = projectiles.length - 1; i >= 0; i--) {
+const pr = projectiles[i];
+if (pr.type === 'grenade') pr.vel.y -= 0.02;
+pr.mesh.position.add(pr.vel);
+pr.life--;
+let hit = pr.mesh.position.y <= 0;
+for (const en of enemies) {
+if (en.alive && en.mesh.position.distanceTo(pr.mesh.position) < 2.2) {
+en.alive = false; en.mesh.visible = false; hit = true;
+}
+}
+for (const h of hostages) {
+if (!h.freed && h.group.position.distanceTo(pr.mesh.position) < 2.5) {
+h.freed = true; h.ice.visible = false; hit = true;
+}
+}
+if (boss.visible && boss.position.distanceTo(pr.mesh.position) < 4.5) {
+bossHP -= (pr.type === 'grenade' ? 25 : 8);
+hit = true;
+}
+if (hit || pr.life <= 0) {
+if (pr.type === 'grenade') {
+const boom = new THREE.Mesh(SPH, new THREE.MeshBasicMaterial({ color: '#fb923c', transparent: true, opacity: 0.8 }));
+boom.position.copy(pr.mesh.position); boom.scale.setScalar(1);
+sc.add(boom); explosions.push({ mesh: boom, life: 15 });
+for (const en of enemies) if (en.alive && en.mesh.position.distanceTo(pr.mesh.position) < 9) { en.alive = false; en.mesh.visible = false; }
+}
+sc.remove(pr.mesh);
+projectiles.splice(i, 1);
+}
+}
+for (let i = explosions.length - 1; i >= 0; i--) {
+const ex = explosions[i];
+ex.mesh.scale.addScalar(0.55);
+ex.mesh.material.opacity -= 0.05;
+if (--ex.life <= 0) { sc.remove(ex.mesh); explosions.splice(i, 1); }
+}
+for (const c of cars) {
+if (c.alongX) { c.mesh.position.x += c.speed; if (Math.abs(c.mesh.position.x) > 155) c.mesh.position.x *= -1; }
+else { c.mesh.position.z += c.speed; if (Math.abs(c.mesh.position.z) > 155) c.mesh.position.z *= -1; }
+}
+for (const m of mugs) {
+if (m.taken) continue;
+m.mesh.rotation.y += 0.04;
+if (m.mesh.position.distanceTo(p) < 2.2) { m.taken = true; m.mesh.visible = false; }
+}
+const cur = chapters[chapter];
+if (cur.check() && chapter < chapters.length - 1) chapter++;
+const activeChap = chapters[chapter];
+const tgt = activeChap.target();
+beacon.position.set(tgt.x, 70, tgt.z);
+const dx = tgt.x - p.x, dz = tgt.z - p.z;
+document.getElementById('arr-icon').style.transform = rotate(${-(Math.atan2(dx, dz) - yaw)}rad);
+document.getElementById('arr-dist').textContent = Math.round(Math.hypot(dx, dz)) + 'm';
+document.getElementById('chapter-title').textContent = activeChap.title;
+document.getElementById('mission-txt').textContent = typeof activeChap.desc === 'function' ? activeChap.desc() : activeChap.desc;
+document.getElementById('cocoa-txt').textContent = mugs.filter(m => m.taken).length;
+const camDist = 13;
+cam.position.set(
+p.x + Math.sin(yaw) * Math.cos(pitch) * camDist,
+p.y + 2.5 + Math.sin(pitch) * camDist,
+p.z + Math.cos(yaw) * Math.cos(pitch) * camDist
+);
+cam.lookAt(p.x, p.y + 2.0, p.z);
+ren.render(sc, cam);
+}
+window.addEventListener('resize', () => {
+cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix();
+ren.setSize(innerWidth, innerHeight);
+});
+loop();
